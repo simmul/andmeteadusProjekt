@@ -1,0 +1,32 @@
+library(leaflet)
+library(geosphere)
+
+airports <- read.csv("airports.csv")
+flights <- read.csv("flights.csv")
+
+tallinn <- airports %>% 
+  filter(id == 415)
+
+tallinnast_lennud <- airports %>% 
+  filter(id %in% flights[flights$source_airport_id == 415, "dest_airport_id"])
+
+m = leaflet() #koordinaatsĆ¼steemis sisse lugemine
+
+m = addTiles(m) #kaardikihtide lisamine
+
+m = m %>% #punktide lisamine kaardile
+  addCircles(lng = tallinnast_lennud$lon, lat = tallinnast_lennud$lat, color = 'red', weight = 0.3) %>% 
+  addCircles(lng = tallinn$lon, lat = tallinn$lat, color = 'red', weight = 0.3)
+
+for (i in 1:nrow(tallinnast_lennud)) {
+  gc_points = gcIntermediate(c(tallinn$lon, tallinn$lat), 
+                             c(tallinnast_lennud$lon[i], tallinnast_lennud$lat[i]), 
+                             n = 50, addStartEnd = TRUE)
+  
+  gc = data.frame(gc_points)
+  
+  m = m %>% #joonte lisamine kaardile
+    addPolylines(lng = gc$lon, lat = gc$lat, weight = 3, color = 'red')
+}
+
+m
