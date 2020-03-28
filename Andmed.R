@@ -1,6 +1,8 @@
 library(dplyr)
 library(stringr)
 library(purrr)
+library(leaflet)
+library(geosphere)
 
 #install.packages('rstudioapi')
 setwd(dirname(rstudioapi::getActiveDocumentContext()[[2]]))
@@ -11,6 +13,10 @@ setwd(dirname(rstudioapi::getActiveDocumentContext()[[2]]))
 
 #panin github-i juba filtreeritud faili, et ei oleks liiga suur.
 andmed <- read.csv("ny_gun_violence_2013_2018.csv", sep = ",", header = T)
+
+#jätame ära need, kus koordinaate pole antud (216 rida)
+andmed <- andmed %>% 
+  filter(!is.na(latitude))
 
 metroo <- read.csv("ny_subway_2010.csv", sep = ",", header = T)
 
@@ -37,12 +43,16 @@ numextract <- function(string){ #pattern on leitud internetist: http://stla.gith
   return(list)
 }
 
+#eraldame koordinaadi tunndused
 metroo <- metroo %>% 
   mutate(the_geom = as.character(the_geom),
          lat = as.numeric(map(numextract(the_geom),2)),
          lon = as.numeric(map(numextract(the_geom),1)))
 
-#---Et aru saada, mis võtta metroo "mõjuala raadiuseks"
+#tekib mulje, et andmestikus on toodud ära kõik sissepääsud; sel juhul võiks jätta ühe peatuse kohta ühe sissepääsu;
+#selleks grupeerime nime järgi, aga ei tea kas on ikka nii...
+
+#---Et aru saada, mis võtta metroo "mõjuala raadiuseks"---
 
 #Pane siia argumendiks proovitav raadius 
 Info <- function(r) {
@@ -74,33 +84,53 @@ Info <- function(r) {
 }
 Info(0.5)
 
-#----Visualiseerime kõik andmestiku punktid
+less_than_r <- function(list, r) {
+  return(list < r)
+}
 
-library(leaflet)
-library(geosphere)
+
+#---Muuda seda r-i ja jooksuta kogu allolev kood, et nähe punasega tulistamised,
+#mis on mõnele metroole lähemal kui r km, kollasega ülejäänud ning sinisega metrood.
+#Vist peab valima r piisavalt väikses, et ei oleks päris kõik punane.
+#(vajalikud paketid on koodi ülal)
+
+r = 0.5 #märgime ära tulistamised, mis on toimunud MINGILE metroole lähemal kui r kilomeetrit
+andmed <- andmed %>% 
+  mutate(lahedal = 
+           ifelse(
+             map(map(map2(latitude, longitude, vahemaa, metroo$lat, metroo$lon),less_than_r,r),sum) > 0,
+             TRUE,
+             FALSE
+           ))
+
+#----Visualiseerime kõik andmestiku punktid
 
 m = leaflet() #koordinaatsüsteemis sisse lugemine
 
 m = addTiles(m) #kaardikihtide lisamine
 
+#tulistamiset lisamine kaardile:
 for (i in 1:nrow(andmed)) {
-  m = m %>% #punktide lisamine kaardile
-    addCircles(andmed$longitude[i], andmed$latitude[i], color = 'red', weight = 3)
+  if (andmed$lahedal[i]) { #punasega, kui on toimunud mõnele metroole lähemal kui r
+    m = m %>% 
+      addCircles(andmed$longitude[i], andmed$latitude[i], color = 'red', weight = 3)
+  } else { #kollasega muidu
+    #väga kauged kollased punktid võib tulevikus andmestikust varem eemaldada, et 
+    #asi kiiremini jookseks
+    m = m %>% 
+      addCircles(andmed$longitude[i], andmed$latitude[i], color = 'yellow', weight = 3)
+  }
+}
+#metroode lisamine kaardile sinisega
+for (i in 1:nrow(metroo)) {
+  m = m %>% 
+    addCircles(metroo$lon[i], metroo$lat[i], color = 'blue', weight = 3)
 }
 
 m = m %>% 
-  setView(lng = 0, lat = 50, zoom = 3) %>% 
-  addProviderTiles("Esri.WorldImagery") #geoloogiline
+  setView(lng = metroo$lon[1], lat = metroo$lat[1], zoom = 5)
+#  addProviderTiles("Esri.WorldImagery") #geoloogiline
 m
-
-#Kui vaadata kaarti, siis on nähe, et peaks olema küll tulistamisi ka metroode ümbruses. See tähendab, et peab üle vaatama filtri
-#real 40-42.
-
-
-
-
-
-
 
 
 
