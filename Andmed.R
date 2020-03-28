@@ -1,4 +1,6 @@
 library(dplyr)
+library(stringr)
+library(purrr)
 
 #install.packages('rstudioapi')
 setwd(dirname(rstudioapi::getActiveDocumentContext()[[2]]))
@@ -12,8 +14,8 @@ andmed <- read.csv("ny_gun_violence_2013_2018.csv", sep = ",", header = T)
 
 metroo <- read.csv("ny_subway_2010.csv", sep = ",", header = T)
 
-#Arvutame kauguse kahe punkti vahel kasutades nende koordinaate (v�ttes arvesse maakera kumerust, kuid mitte m�gesi ning ellipsoidilist kuju).
-#Kuna vahemaad on v�rdlemisi l�hikesed, ei tohiks see probleemi valmistada.
+#Arvutame kauguse kahe punkti vahel kasutades nende koordinaate (võttes arvesse maakera kumerust, kuid mitte mägesi ning ellipsoidilist kuju).
+#Kuna vahemaad on võrdlemisi lühikesed, ei tohiks see probleemi valmistada.
 
 deg2rad <- function(d) {
   return(d*pi/180)
@@ -30,37 +32,54 @@ vahemaa <- function(lat1, lon1, lat2, lon2) {
   return(d)
 }
 
-Numextract <- function(string){  #see funktsioon on leitud internetist: http://stla.github.io/stlapblog/posts/Numextract.html
-  unlist(regmatches(string,gregexpr("[[:digit:]]+\\.*[[:digit:]]*",string)))
+numextract <- function(string){ #pattern on leitud internetist: http://stla.github.io/stlapblog/posts/Numextract.html
+  list <- str_extract_all(string, "\\-*\\d+\\.*\\d*")
+  return(list)
 }
-
-metroo_naide <- as.character(metroo[1,4])
-metroo_naide
-
-lat1 <- as.numeric(Numextract(metroo_naide))[1]
-lat2 <- as.numeric(Numextract(metroo_naide))[2]
-
-andmed_alus %>% 
-  filter(vahemaa(lat1, lat2, latitude, longitude) <= 1000) %>%  #leiame tulistamised, mis leidsid aset sellele metroole l�hemal kui 1000 km
-  nrow()  #tuleb null sellist
 
 metroo <- metroo %>% 
   mutate(the_geom = as.character(the_geom),
-         lat = as.numeric(Numextract(the_geom)[seq(1,2*nrow(metroo),2)]),
-         lon = as.numeric(Numextract(the_geom)[seq(2,2*nrow(metroo),2)]))
+         lat = as.numeric(map(numextract(the_geom),2)),
+         lon = as.numeric(map(numextract(the_geom),1)))
 
-vahemaa(metroo$lat[1],metroo$lon[1],metroo$lat,metroo$lon)
+#---Et aru saada, mis võtta metroo "mõjuala raadiuseks"
 
-andmed %>% 
-  filter(sum(vahemaa(latitude, longitude, metroo$lat, metroo$lon) <= 100) >= 1) %>% 
-  nrow()
+#Pane siia argumendiks proovitav raadius 
+Info <- function(r) {
+  mitu_lähemal_kui_r <- c()
+  for (i in 1:nrow(metroo)) {
+    mitu <- andmed %>% 
+      filter(vahemaa(metroo$lat[i], metroo$lon[i], latitude, longitude) < r) %>% 
+      nrow()
+    mitu_lähemal_kui_r <- c(mitu_lähemal_kui_r, mitu)
+  }
+  
+  lugeja <- 0
+  for (i in 1:nrow(metroo)) {
+    for (j in 1:nrow(metroo)) {
+      if (i > j & vahemaa(metroo$lat[i], metroo$lon[i], metroo$lat[j], metroo$lon[j]) <= r) {
+        lugeja <- lugeja + 1
+      }
+    }
+  }
+  cat(
+    paste0("Kokkuvõtteks:
+  kui võtame r=", r, ", siis tulistamiste arv metroo ümber jaguneb järgnevalt\n\n")
+  )
+  print(summary(mitu_lähemal_kui_r))
+  cat(
+    paste0("\n  kusjuures metroosi, millele nii lähedal ei ole toimunud ühtegi tulistamist on ", sum(mitu_lähemal_kui_r == 0),".
+  Kuna ei ole väga hea kui üks tulistamine satub mitme metroo raadiusesse (võib arutleda, et siis polegi seal midagi pistmist metrooga), siis tasub tähele panna, et metroo paare, mis satuvad üksteise raadiusesse, on ", lugeja)
+  )
+}
+Info(0.5)
 
-#----Visualiseerime k�ik andmestiku punktid
+#----Visualiseerime kõik andmestiku punktid
 
 library(leaflet)
 library(geosphere)
 
-m = leaflet() #koordinaats�steemis sisse lugemine
+m = leaflet() #koordinaatsüsteemis sisse lugemine
 
 m = addTiles(m) #kaardikihtide lisamine
 
@@ -74,8 +93,14 @@ m = m %>%
   addProviderTiles("Esri.WorldImagery") #geoloogiline
 m
 
-#Kui vaadata kaarti, siis on n�he, et peaks olema k�ll tulistamisi ka metroode �mbruses. See t�hendab, et peab �le vaatama filtri
+#Kui vaadata kaarti, siis on nähe, et peaks olema küll tulistamisi ka metroode ümbruses. See tähendab, et peab üle vaatama filtri
 #real 40-42.
+
+
+
+
+
+
 
 
 
