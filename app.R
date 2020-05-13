@@ -164,7 +164,7 @@ subwayIcon <- makeIcon("subway_logo.png", "subway_logo.png", 24, 24)
 
 # r1 < r2, kus r1 on see, kui lähedal olevad tulistamised märgime punasega ja
 # r2 on see kui laialt kaarti näitame
-r2 <- 2
+r2 <- 5
 
 kaart_metrooNimi <- function(metrooNimi, r1, algus_kp = ymd("2013-01-01"), l6pp_kp = ymd("2018-12-31"), kas_hukkunutega = T) {
   m_lat <- as.numeric(metroo[metroo$NAME == metrooNimi, "lat"])
@@ -177,7 +177,7 @@ kaart_metrooNimi <- function(metrooNimi, r1, algus_kp = ymd("2013-01-01"), l6pp_
     filter(
       vahemaa(latitude, longitude, m_lat, m_lon) < r2,
       date %within% interval(algus_kp, l6pp_kp),
-      if (!kas_hukkunutega) {n_killed == 0} else {T}
+      if (kas_hukkunutega) {n_killed > 0} else {T}
     ) %>%
     leaflet() %>%
     addProviderTiles(providers$CartoDB.DarkMatter) %>% #Võetud RShiny rakenduse näitest https://github.com/CodingTigerTang/NYC_Metro_Vis/blob/master/app.R
@@ -202,12 +202,43 @@ kaart_linnaosaNimi <- function(linnaosaNimi, r1, algus_kp = ymd("2013-01-01"), l
         TRUE,
         FALSE),
       date %within% interval(algus_kp, l6pp_kp),
-      if (!kas_hukkunutega) {n_killed == 0} else {T}
+      if (kas_hukkunutega) {n_killed > 0} else {T}
     ) %>%
     leaflet() %>%
     addProviderTiles(providers$CartoDB.DarkMatter) %>%
     addCircles(~longitude, ~latitude, popup = ~sedel, color = ~pal(as.factor(lahedal))) %>%
     addMarkers(data = linnaosa_metrood, ~lon, ~lat, label = ~NAME, icon = subwayIcon)
+}
+
+box_plot <- function(nimi, r1, algus_kp = ymd("2013-01-01"), l6pp_kp = ymd("2018-12-31"), kas_hukkunutega = T) {
+  linnaosa_metrood <- metroo %>% filter(borough == nimi)
+  andmed %>%
+    mutate(
+      lahedal = ifelse(
+        map(map(map2(latitude, longitude, vahemaa, linnaosa_metrood$lat, linnaosa_metrood$lon),less_than_r,r1),sum) > 0,
+        TRUE,
+        FALSE)
+    ) %>%
+    filter(
+      ifelse(
+        map(map(map2(latitude, longitude, vahemaa, linnaosa_metrood$lat, linnaosa_metrood$lon),less_than_r,r2),sum) > 0,
+        TRUE,
+        FALSE),
+      date %within% interval(algus_kp, l6pp_kp),
+      if (kas_hukkunutega) {n_killed > 0} else {T}
+    ) %>%
+    ggplot(aes(x=lahedal)) +
+      geom_bar(aes(fill = lahedal)) +
+      scale_fill_manual(values = c("navy", "red")) +
+      xlab(paste("Palju tulistamisi leidis aset lähemal kui", r1, "kilomeetrit")) + 
+      ylab("Kokku") + 
+      scale_x_discrete(labels = c("Kaugel", "Lähedal")) +
+      theme(legend.position = "none", 
+            text = element_text(color = "white"),
+            panel.grid.minor = element_blank(), 
+            panel.grid.major = element_blank(),
+            panel.background = element_blank(),
+            plot.background = element_blank())
 }
 
 #Shiny Dashboard----
@@ -224,7 +255,7 @@ ui <- dashboardPage(skin = "black",
                       tabItems(
                         tabItem(tabName = "Kaart",
                                 bootstrapPage(
-                                  leafletOutput("kaart", width = "100%"),
+                                  leafletOutput("kaart", width = "100%", height = round(0.76*current_resolution[2])),
                                   absolutePanel(top = 150, left = 270, draggable = TRUE, width = "20%",
                                                 radioButtons("liik", 
                                                              "Vali kas kaart luuakse peatuse või linnaosa järgi",
@@ -253,15 +284,17 @@ ui <- dashboardPage(skin = "black",
                                                             max = ymd("2018-12-31"),
                                                             value = c(ymd("2013-01-01"),ymd("2018-12-31"))),
                                                 checkboxInput("kasHukkunutega", 
-                                                              "Näita andmeid ka nende tulistamiste kohta, kus oli hukkunuid", 
-                                                              TRUE),
+                                                              "Näita ainult neid tulistamisi, kus oli hukkunuid", 
+                                                              FALSE),
                                                 actionButton("plot", "Loo kaart")
-                                  )
+                                  ),
+                                  absolutePanel(bottom = 150, right = 100, draggable = TRUE, width = "10%",
+                                                plotOutput("box_plot"))
                                 )
                         ),
                         tabItem(tabName = "Animatsioon",
                                 bootstrapPage(
-                                  leafletOutput("animatsioon", width = "100%"),
+                                  leafletOutput("animatsioon", width = "100%", height = round(0.76*current_resolution[2])),
                                   absolutePanel(top = 150, left = 270, draggable = TRUE, width = "20%",
                                                 sliderInput("anim_KP",
                                                             "",
@@ -307,6 +340,17 @@ server <- function(input, output) {
       clearMarkers() %>%
       addCircleMarkers(~longitude, ~latitude, color = ~pal(as.factor(hukkunuga)))
   })
+  
+  boxplot <- eventReactive(input$plot, {
+    if (input$liik != "Peatus") {
+       box_plot(nimi = input$linnaosaNimi,
+                r1 = input$raadius, algus_kp = input$KP[1], l6pp_kp = input$KP[2], kas_hukkunutega = input$kasHukkunutega)
+    }
+  })
+  
+  output$box_plot <- renderPlot({
+    boxplot()
+  }, bg="transparent")
   
 }
 
